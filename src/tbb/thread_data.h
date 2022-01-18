@@ -170,8 +170,8 @@ public:
         invalid,
         register_waiter,
         resume,
+        finilized_suspend,
         callback,
-        recall_callback,
         cleanup,
         notify,
         none
