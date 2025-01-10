@@ -23,13 +23,13 @@ This document provides details about hardware, operating system, and software pr
   - [Supported Operating Systems](#supported-operating-systems)
   - [Community-Supported Platforms](#community-supported-platforms)
   - [Supported Compilers](#supported-compilers)
+- [Limitations](#limitations)
 
 
 ## Supported Hardware
 - Intel(R) Celeron(R) processor family
 - Intel(R) Core* processor family
 - Intel(R) Xeon(R) processor family
-- Intel(R) Xeon Phi* processor family
 - Intel(R) Atom* processor family
 - Non-Intel(R) processors compatible with the processors listed above
 
@@ -44,9 +44,10 @@ This document provides details about hardware, operating system, and software pr
   - Microsoft* Windows* Server 2022
 - Systems with Linux* operating systems:
   - Oracle Linux* 8
-  - Amazon* Linux* 2
+  - Amazon* Linux 2, 2022
   - Debian* 9, 10, 11
-  - Fedora* 36, 37
+  - Fedora* 36, 37, 38
+  - Rocky* Linux* 8, 9
   - Red Hat* Enterprise Linux* 8, 9
   - SuSE* Linux* Enterprise Server 15
   - Ubuntu* 20.04, 22.04
@@ -63,10 +64,23 @@ This document provides details about hardware, operating system, and software pr
 
 ### Supported Compilers
 - Intel* oneAPI DPC++/C++ Compiler
-- Intel* C++ Compiler 19.0 and 19.1 version
+- Intel® C++ Compiler Classic 2021.1 - 2021.9
 - Microsoft* Visual C++ 14.2 (Microsoft* Visual Studio* 2019, Windows* OS only)
 - Microsoft* Visual C++ 14.3 (Microsoft* Visual Studio* 2022, Windows* OS only)
 - For each supported Linux* operating system, the standard gcc version provided with that operating system is supported:
-  - GNU Compilers (gcc) 4.8.5 - 11.2.1
-  - GNU C Library (glibc) version 2.17 - 2.34
+  - GNU Compilers (gcc) 8.x – 12.x
+  - GNU C Library (glibc) version 2.28 – 2.36
   - Clang* 6.0.0 - 13.0.0
+
+## Limitations
+There are some cases where we cannot provide support for your platforms. It includes: 
+
+1. The platform is out of official support (met end of life). When you use an unsupported platform, you can face a security risk that can be difficult to resolve.
+2. We do not have the infrastructure to test a platform. Therefore we cannot guarantee that oneTBB works correctly on that platform. 
+3. Changes affect more code than just platform-specific macros.
+4. The platform is incompatible with oneTBB. Some platforms may have limitations that prevent oneTBB from working correctly. We cannot provide support in these cases as the issue is beyond our control.
+5. The platform is modified or customized. If you made significant updates to your platform, it might be hard for us to find the root cause of the issue. Therefore, we may not be able to provide support as the modification could affect the oneTBB functionality. 
+
+
+We understand that these limitations can be frustrating. Thus, we suggest creating a branch specifically for the unsupported platform, allowing other users to contribute to or use your implementation.
+
