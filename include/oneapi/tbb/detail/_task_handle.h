@@ -137,7 +137,15 @@ private:
 #endif // __TBB_PREVIEW_TASK_GROUP_EXTENSIONS
 
 class task_handle_task : public d1::task {
-    std::uint64_t m_version_and_traits{};
+    // Pointer to the instantiation of destroy_function_task with the concrete derived type,
+    // used for correct destruction and deallocation of the task
+    using destroy_func_type = void (*)(task_handle_task*, d1::small_object_allocator&, const d1::execution_data*);
+
+    // Reuses the first std::uint64_t field (previously m_version_and_traits) to maintain backward compatibility
+    // The type of the first field remains std::uint64_t to preserve alignment and offset of subsequent member variables.
+    static_assert(sizeof(destroy_func_type) <= sizeof(std::uint64_t), "Cannot fit destroy pointer into std::uint64_t");
+    std::uint64_t m_destroy_func;
+
     d1::wait_tree_vertex_interface* m_wait_tree_vertex;
     d1::task_group_context& m_ctx;
     d1::small_object_allocator m_allocator;
@@ -145,23 +153,29 @@ class task_handle_task : public d1::task {
     std::atomic<task_dynamic_state*> m_dynamic_state;
 #endif
 public:
-    void finalize(const d1::execution_data* ed = nullptr) {
-        if (ed) {
-            m_allocator.delete_object(this, *ed);
+    void destroy(const d1::execution_data* ed = nullptr) {
+        destroy_func_type destroy_func = reinterpret_cast<destroy_func_type>(m_destroy_func);
+        if (destroy_func != nullptr) {
+            // If the destroy function is set for the current instantiation - use it
+            (*destroy_func)(this, m_allocator, ed);
         } else {
-            m_allocator.delete_object(this);
+            // Otherwise, the object was compiled with the old version of the library
+            // Destroy the object and let the memory leak since the derived type is unknown
+            // and the object cannot be deallocated properly
+            this->~task_handle_task();
         }
     }
 
-    task_handle_task(d1::wait_tree_vertex_interface* vertex, d1::task_group_context& ctx, d1::small_object_allocator& alloc)
-        : m_wait_tree_vertex(vertex)
+    task_handle_task(d1::wait_tree_vertex_interface* vertex, d1::task_group_context& ctx,
+                     d1::small_object_allocator& alloc, destroy_func_type destroy_func)
+        : m_destroy_func(reinterpret_cast<std::uint64_t>(destroy_func))
+        , m_wait_tree_vertex(vertex)
         , m_ctx(ctx)
         , m_allocator(alloc)
 #if __TBB_PREVIEW_TASK_GROUP_EXTENSIONS
         , m_dynamic_state(nullptr)
 #endif
     {
-        suppress_unused_warning(m_version_and_traits);
         m_wait_tree_vertex->reserve();
     }
 
@@ -227,10 +241,10 @@ public:
 };
 
 class task_handle {
-    struct task_handle_task_finalizer_t{
-        void operator()(task_handle_task* p){ p->finalize(); }
+    struct task_handle_task_deleter {
+        void operator()(task_handle_task* p){ p->destroy(); }
     };
-    using handle_impl_t = std::unique_ptr<task_handle_task, task_handle_task_finalizer_t>;
+    using handle_impl_t = std::unique_ptr<task_handle_task, task_handle_task_deleter>;
 
     handle_impl_t m_handle = {nullptr};
 public:
