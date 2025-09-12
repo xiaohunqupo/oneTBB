@@ -14,8 +14,9 @@
     limitations under the License.
 */
 
+//! Test for the availability of extensions
 //! \file test_tbb_version.cpp
-//! \brief Test for the availability of extensions
+//! \brief Test for [configuration.feature_macros] specification
 
 #include "tbb/version.h"
 // checking that inclusion of version.h is enough to get TBB_EXT_CUSTOM_ASSERTION_HANDLER
