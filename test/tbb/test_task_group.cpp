@@ -2160,10 +2160,9 @@ enum class wait_for_function_tag {
 
 tbb::task_group_status wait_for(tbb::task_completion_handle& task, tbb::task_group& tg, tbb::task_arena& arena, wait_for_function_tag tag) {
     tbb::task_group_status status = tbb::task_group_status::not_complete;
-    if (tag == wait_for_function_tag::group_wait_task) {
+    if (tag == wait_for_function_tag::group_wait_task || tag == wait_for_function_tag::group_run_and_wait_task) {
         status = tg.wait_for_task(task);
     } else {
-        CHECK_MESSAGE(tag != wait_for_function_tag::group_run_and_wait_task, "Unsupported wait_for_function_tag");
         if (tag == wait_for_function_tag::arena_wait_for) {
             status = arena.wait_for(task);
         }
@@ -2215,6 +2214,8 @@ void test_single_task_wait_with_no_dependencies(bool do_cancellation, wait_for_f
         if (do_cancellation) tg.cancel();
     });
 
+    tbb::task_completion_handle first_block_comp_handle = first_block_task;
+
     tbb::task_group_status task_status = run_and_wait_for(std::move(first_block_task), tg, arena, tag);
     
     tbb::task_group_status expected_task_status = tbb::task_group_status::not_complete;
@@ -2233,6 +2234,13 @@ void test_single_task_wait_with_no_dependencies(bool do_cancellation, wait_for_f
     for (std::size_t i = 0; i < block_size; ++i) {
         CHECK_MESSAGE(items[i] == expected_item, "Incorrect item processing result");
     }
+
+    // Test that waiting on the completed task returns the same status
+    for (std::size_t i = 0; i < 10; ++i) {
+        CHECK_MESSAGE(expected_task_status == wait_for(first_block_comp_handle, tg, arena, tag),
+                      "Incorrect task status returned");
+    }
+
 
     tbb::task_group_status group_status = arena.wait_for(tg);
     CHECK_MESSAGE(group_status == expected_group_status, "Incorrect group status returned");
@@ -2401,12 +2409,53 @@ void test_single_task_wait_transferring(bool do_cancellation, wait_for_function_
     }
 }
 
+void test_concurrent_single_task_wait(bool do_cancellation, wait_for_function_tag tag) {
+    tbb::task_group tg;
+    tbb::task_arena arena;
+
+    tbb::task_handle task;
+    tbb::task_completion_handle comp_handle;
+    
+    arena.execute([&] {
+        task = tg.defer([&] {
+            CHECK_MESSAGE(!do_cancellation, "Task should not be called in case of group cancellation");
+        });
+        comp_handle = task;
+    });
+
+    tbb::task_group_status expected_status = do_cancellation ? tbb::task_group_status::canceled
+                                                             : tbb::task_group_status::task_complete;
+
+    int num_threads = tbb::this_task_arena::max_concurrency();
+    utils::SpinBarrier barrier(num_threads);
+
+    utils::NativeParallelFor(num_threads,
+        [&](std::size_t index) {
+            tbb::task_group_status status;
+            barrier.wait();
+            if (index == 0) {
+                // Short sleep to increase the number of threads entered the wait_for function
+                utils::Sleep(10);
+                
+                if (do_cancellation) {
+                    tg.cancel();
+                }
+
+                status = run_and_wait_for(std::move(task), tg, arena, tag);
+            } else {
+                status = wait_for(comp_handle, tg, arena, tag);
+            }
+            CHECK_MESSAGE(status == expected_status, "Incorrect status returned");
+        });
+}
+
 void test_single_task_wait_base(bool cancellation, wait_for_function_tag tag) {
     for (unsigned num_threads = MinThread; num_threads <= MaxThread; ++num_threads) {
         tbb::global_control ctl(tbb::global_control::max_allowed_parallelism, num_threads);
         test_single_task_wait_with_no_dependencies(cancellation, tag);
         test_single_task_wait_with_dependencies(cancellation, tag);
         test_single_task_wait_transferring(cancellation, tag);
+        test_concurrent_single_task_wait(cancellation, tag);
     }
 }
 
@@ -2482,7 +2531,7 @@ void test_get_status_of() {
         CHECK_MESSAGE(tg_ptr->get_status_of(comp_handle) == tbb::task_group_status::not_complete,
                     "Incorrect task_group_status returned");
         ++placeholder;
-    };
+        };
 
     {
         tbb::task_group tg;
@@ -2529,6 +2578,7 @@ TEST_CASE("test single task wait") {
     test_single_task_wait(/*cancel = */true);
 }
 
+//! \brief \ref interface \ref requirement
 TEST_CASE("test task_group::get_status_of") {
     test_get_status_of();
 }
