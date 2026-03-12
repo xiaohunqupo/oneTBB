@@ -136,7 +136,7 @@ void test_several_resources() {
     g.wait_for_all();
 
     std::unordered_set<int> validation_set;
-    for (std::size_t i = 0; i < 10; ++i) {
+    for (int i = 0; i < 10; ++i) {
         validation_set.emplace(100 + i);
     }
 
@@ -397,19 +397,19 @@ template <typename Handle>
 using limiter_unique_ptr = std::unique_ptr<oneapi::tbb::flow::resource_limiter<Handle>>;
 
 template <std::size_t... Idx>
-limiter_unique_ptr<int> get_limiter_impl(tbb::detail::index_sequence<Idx...>) {
-    return limiter_unique_ptr<int>(new oneapi::tbb::flow::resource_limiter<int>(Idx...));
+limiter_unique_ptr<std::size_t> get_limiter_impl(tbb::detail::index_sequence<Idx...>) {
+    return limiter_unique_ptr<std::size_t>(new oneapi::tbb::flow::resource_limiter<std::size_t>(Idx...));
 }
 
 template <std::size_t NumResources>
-limiter_unique_ptr<int> get_limiter() {
+limiter_unique_ptr<std::size_t> get_limiter() {
     return get_limiter_impl(tbb::detail::make_index_sequence<NumResources>());
 }
 
 //! \brief \ref interface \ref requirement
 TEST_CASE("resource_limited_node concurrency") {
     // For correct test behavior number of resources should be greater than number of threads in arena
-    constexpr std::size_t num_threads = 50;
+    constexpr int num_threads = 50;
     auto limiter_ptr = get_limiter<num_threads + 1>();
     oneapi::tbb::task_arena arena(num_threads);
 
@@ -469,8 +469,8 @@ TEST_CASE("resource_limited_node and std::invoke") {
     using second_ports_type = typename second_rl_node_type::output_ports_type;
 
     graph g;
-    auto first_body = &input_type::template send_id<first_ports_type, int&>;
-    auto second_body = &output_type1::template send_id<second_ports_type, int&>;
+    auto first_body = &input_type::template send_id<first_ports_type, std::size_t&>;
+    auto second_body = &output_type1::template send_id<second_ports_type, std::size_t&>;
 
     auto limiter_ptr = get_limiter<10>();
 
