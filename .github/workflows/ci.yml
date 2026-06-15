@@ -500,7 +500,7 @@ jobs:
           cmake --build . -v --target light_test_examples
 
   linux-doc-examples-testing:
-    name: doc_examples_${{ matrix.os }}_${{ matrix.cxx_compiler }}_cxx${{ matrix.std }}_${{ matrix.build_type }}
+    name: doc_examples_${{ matrix.os }}_${{ matrix.cxx_compiler }}_cxx${{ matrix.std }}_${{ matrix.build_type }}_${{ matrix.cmake_extra }}
     runs-on: ['${{ matrix.os }}']
     timeout-minutes: 10
     strategy:
@@ -508,10 +508,12 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            c_compiler: gcc
-            cxx_compiler: g++
+            c_compiler: clang
+            cxx_compiler: clang++
+            generator: Ninja
             std: 20
             build_type: relwithdebinfo
+            cmake_extra: -DTBB_TEST_CXX20_MODULES=ON
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -519,17 +521,25 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install dependencies
+        shell: bash
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          if [[ "${{ matrix.cxx_compiler }}" == "clang++" ]]; then
+            sudo apt-get install -y libomp-dev
+          fi
       - name: Test doc examples
         run: |
+          set -x
           mkdir build && cd build
-          cmake -DCMAKE_CXX_STANDARD=${{ matrix.std }} -DCMAKE_BUILD_TYPE=${{ matrix.build_type}} \
+          cmake -G "${{ matrix.generator }}" -DCMAKE_CXX_STANDARD=${{ matrix.std }} -DCMAKE_BUILD_TYPE=${{ matrix.build_type}} \
             -DCMAKE_CXX_COMPILER=${{ matrix.cxx_compiler }} -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
-            -DTBB_TEST=OFF -DTBB_DOC_EXAMPLES=ON ..
+            ${{ matrix.cmake_extra }} -DTBB_TEST=OFF -DTBB_DOC_EXAMPLES=ON ..
           cmake --build . -v --parallel --target build-doc-examples
           ctest -C ${{ matrix.build_type }} --timeout ${env:TEST_TIMEOUT} --output-on-failure -L doc-examples
 
   windows-doc-examples-testing:
-    name: doc_examples_${{ matrix.os }}_${{ matrix.cxx_compiler }}_cxx${{ matrix.std }}_${{ matrix.build_type }}
+    name: doc_examples_${{ matrix.os }}_${{ matrix.cxx_compiler }}_cxx${{ matrix.std }}_${{ matrix.build_type }}_${{ matrix.cmake_extra }}
     runs-on: ['${{ matrix.os }}']
     timeout-minutes: 10
     strategy:
@@ -542,6 +552,7 @@ jobs:
             cxx_compiler: cl
             std: 20
             build_type: relwithdebinfo
+            cmake_extra: -DTBB_TEST_CXX20_MODULES=ON
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -551,10 +562,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Test doc examples
         run: |
-          mkdir build
-          cd build
+          mkdir build && cd build
           cmake -G "${{ matrix.generator }}" -A x64 -DCMAKE_CXX_STANDARD=${{ matrix.std }} `
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type}} -DCMAKE_CXX_COMPILER=${{ matrix.cxx_compiler }} `
-            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} -DTBB_TEST=OFF -DTBB_DOC_EXAMPLES=ON ..
+            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} ${{ matrix.cmake_extra }} -DTBB_TEST=OFF -DTBB_DOC_EXAMPLES=ON ..
           cmake --build . --config ${{ matrix.build_type }} -v --parallel --target build-doc-examples
           ctest -C ${{ matrix.build_type }} --timeout ${env:TEST_TIMEOUT} --output-on-failure -L doc-examples
