@@ -21,6 +21,8 @@
 #error Do not #include this internal file directly; use public TBB headers instead.
 #endif
 
+#include "_range_common.h"
+
 #include <unordered_map>
 #include <forward_list>
 #include <functional>
@@ -64,7 +66,7 @@ class resource_handle_optional {
         ResourceHandle m_resource_handle;
     };
     bool m_has_value;
-
+    
     template <typename... Args>
     void construct(Args&&... args) {
         ::new(&m_resource_handle) ResourceHandle(std::forward<Args>(args)...);
@@ -148,10 +150,31 @@ public:
     using consumer_type = typename resource_provider_base<ResourceHandle>::consumer_type;
     using optional_type = typename resource_provider_base<ResourceHandle>::optional_type;
 
-    template <typename Handle, typename... Handles>
-    resource_limiter(Handle&& handle, Handles&&... handles) {
-        emplace_handles(std::forward<Handle>(handle), std::forward<Handles>(handles)...);
+    resource_limiter() = delete;
+
+    template <typename Tuple, typename... Tuples>
+    resource_limiter(std::piecewise_construct_t, Tuple&& tuple, Tuples&&... tuples) {
+        emplace_handles(std::forward<Tuple>(tuple), std::forward<Tuples>(tuples)...);
     }
+
+    template <typename InputIterator,
+              typename = typename std::iterator_traits<InputIterator>::iterator_category>
+    resource_limiter(InputIterator first, InputIterator last)
+        : m_resource_handles(first, last)
+    {
+        __TBB_ASSERT(!m_resource_handles.empty(), "Attempt to create a resource_limiter with 0 resource handles");
+    }
+
+    template <typename ContainerBasedSequence,
+              typename = decltype(std::begin(std::declval<ContainerBasedSequence&>())),
+              typename = decltype(std::end(std::declval<ContainerBasedSequence&>()))>
+    resource_limiter(ContainerBasedSequence&& sequence)
+        : resource_limiter(std::begin(sequence), std::end(sequence))
+    {}
+
+    resource_limiter(std::initializer_list<ResourceHandle> init)
+        : resource_limiter(init.begin(), init.end())
+    {}
 
     void request(consumer_type& consumer, request_id id) override {
         // TODO: consider using an aggregator instead of mutex
@@ -199,10 +222,18 @@ public:
     using consumer_data = std::pair<request_id, resource_consumer_base<ResourceHandle>*>;
 
 private:
-    template <typename Handle, typename... Handles>
-    void emplace_handles(Handle&& handle, Handles&&... handles) {
-        m_resource_handles.emplace_front(std::forward<Handle>(handle));
-        emplace_handles(std::forward<Handles>(handles)...);
+    template <typename Tuple, std::size_t... Idx>
+    void emplace_single_handle(Tuple&& tuple, tbb::detail::index_sequence<Idx...>) {
+        m_resource_handles.emplace_front(std::get<Idx>(std::forward<Tuple>(tuple))...);
+    }
+
+    template <typename Tuple, typename... Tuples>
+    void emplace_handles(Tuple&& tuple, Tuples&&... tuples) {
+        using decayed_tuple = typename std::decay<Tuple>::type;
+
+        emplace_single_handle(std::forward<Tuple>(tuple),
+                              tbb::detail::make_index_sequence<std::tuple_size<decayed_tuple>::value>());
+        emplace_handles(std::forward<Tuples>(tuples)...);
     }
 
     void emplace_handles() {}

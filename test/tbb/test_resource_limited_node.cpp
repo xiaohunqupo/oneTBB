@@ -25,6 +25,8 @@
 
 #include "tbb/flow_graph.h"
 
+#include <array>
+
 //! \file test_resource_limited_node.cpp
 //! \brief Test for [preview] functionality
 
@@ -176,7 +178,8 @@ void test_strict_resource_handle() {
     using namespace tbb::flow;
 
     int handle_value = 42;
-    resource_limiter<strict_resource_handle> limiter{strict_resource_handle_provider::construct(handle_value)};
+    resource_limiter<strict_resource_handle> limiter(std::piecewise_construct,
+                                                     std::forward_as_tuple(strict_resource_handle_provider::construct(handle_value)));
 
     using node_type = resource_limited_node<int, std::tuple<>>;
     using ports_type = typename node_type::output_ports_type;
@@ -219,8 +222,8 @@ void test_root_genie() {
     using node_type = resource_limited_node<int, std::tuple<int>>;
     using ports_type = typename node_type::output_ports_type;
 
-    resource_limiter<counting_resource*> root_limiter(&root_resource);
-    resource_limiter<counting_resource*> genie_limiter(&genie_resource);
+    resource_limiter<counting_resource*> root_limiter{&root_resource};
+    resource_limiter<counting_resource*> genie_limiter{&genie_resource};
 
     graph g;
 
@@ -303,7 +306,7 @@ void test_cancellation_with_active_requests(bool same_graph, bool exception) {
 
     int resource_value = 1;
     int input_value = 2;
-    resource_limiter<int> limiter(resource_value);
+    resource_limiter<int> limiter{resource_value};
 
     using node_type = resource_limited_node<int, std::tuple<>>;
     using ports_type = typename node_type::output_ports_type;
@@ -379,6 +382,74 @@ void test_cancellation_with_active_requests(bool same_graph, bool exception) {
     }
 }
 
+template <typename ArrayType, typename... ConstructorArgs>
+void test_resource_limiter_constructor(const ArrayType& resource_values, ConstructorArgs&&... constructor_args) {
+    using namespace oneapi::tbb::flow;
+    using resource_type = typename ArrayType::value_type;
+
+    resource_limiter<resource_type> limiter(std::forward<ConstructorArgs>(constructor_args)...);
+
+    graph g;
+
+    using node_type = resource_limited_node<int, std::tuple<>>;
+    using ports_type = typename node_type::output_ports_type;
+    std::atomic<std::size_t> counter(0);
+
+    auto node_body = [&](int, ports_type&, resource_type resource) {
+        auto is_equal = [=](const resource_type& value) { return value == resource; };
+        CHECK_MESSAGE(std::any_of(resource_values.begin(), resource_values.end(), is_equal),
+                      "Unexpected resource");
+                      
+        ++counter;
+        for (std::size_t i = 0; i < 1000; ++i) {
+            CHECK_MESSAGE(counter <= resource_values.size(), "Detected more resources than expected");
+        }
+        --counter;
+    };
+
+    node_type node(g, unlimited, std::tie(limiter), node_body);
+
+    for (int i = 0; i < 1000; ++i) {
+        node.try_put(0);
+    }
+    g.wait_for_all();
+    CHECK(counter == 0);
+}
+
+template <std::size_t... Idx, typename ArrayType>
+void test_resource_limiter_handles_constructor(ArrayType& resources,
+                                               tbb::detail::index_sequence<Idx...>) {
+    CHECK(sizeof...(Idx) == resources.size());
+    test_resource_limiter_constructor(/*resource_values = */resources,
+                                      /*args = */std::piecewise_construct, std::forward_as_tuple(resources[Idx])...);
+}
+
+template <std::size_t... Idx, typename ArrayType>
+void test_resource_limiter_initializer_list_constructor(ArrayType& resources,
+                                                        tbb::detail::index_sequence<Idx...>) {
+    CHECK(sizeof...(Idx) == resources.size());
+    using value_type = typename ArrayType::value_type;
+    std::initializer_list<value_type> init = {resources[Idx]...};
+    test_resource_limiter_constructor(/*resource_values = */resources, /*args = */init);
+} 
+
+template <typename T, std::size_t N>
+void test_resource_limiter_constructors(std::array<T, N>& resources) {
+    auto index_sequence = tbb::detail::make_index_sequence<N>();
+
+    // Test resource_limiter(std::piecewise_construct_t, Tuple&& tuple, Tuples&&... tuples)
+    test_resource_limiter_handles_constructor(resources, index_sequence);
+
+    // Test resource_limiter(std::initializer_list<ResourceHandle> init)
+    test_resource_limiter_initializer_list_constructor(resources, index_sequence);
+
+    // Test resource_limiter(InputIterator first, InputIterator last)
+    test_resource_limiter_constructor(/*resource_values = */resources, /*args = */resources.begin(), resources.end());
+
+    // Test resource_limiter(ContainerBasedSequence&& sequence)
+    test_resource_limiter_constructor(/*resource_values = */resources, /*args = */resources);
+}
+
 //! \brief \ref interface
 TEST_CASE("Feature test macro") {
     CHECK_MESSAGE(TBB_HAS_FLOW_GRAPH_RESOURCE_LIMITING == 202603, "Incorrect feature test macro");
@@ -405,7 +476,7 @@ using limiter_unique_ptr = std::unique_ptr<oneapi::tbb::flow::resource_limiter<H
 
 template <std::size_t... Idx>
 limiter_unique_ptr<std::size_t> get_limiter_impl(tbb::detail::index_sequence<Idx...>) {
-    return limiter_unique_ptr<std::size_t>(new oneapi::tbb::flow::resource_limiter<std::size_t>(Idx...));
+    return limiter_unique_ptr<std::size_t>(new oneapi::tbb::flow::resource_limiter<std::size_t>({Idx...}));
 }
 
 template <std::size_t NumResources>
@@ -568,3 +639,14 @@ TEST_CASE("concurrency limit with multiple resources") {
                  "Expected to observe concurrent execution but max_observed=" << max_observed.load());
 }
 
+//! \brief \ref interface \ref requirement
+TEST_CASE("resource_limiter constructors") {
+    std::array<int, 1> one_resource = {1};
+    test_resource_limiter_constructors(one_resource);
+
+    std::array<int, 2> two_resources = {1, 2};
+    test_resource_limiter_constructors(two_resources);
+
+    std::array<int, 3> three_resources = {1, 2, 3};
+    test_resource_limiter_constructors(three_resources);
+}
